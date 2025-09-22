@@ -243,7 +243,7 @@ int echo_io(char *wbuf, int *wlen, char *rbuf, int *rlen, int iseof,
         if (*wlen == 0 && echo_data->eof == 1)
             *wlen = CI_EOF;
     }
-
+    ci_debug_printf(10, "echo_io: got from client %d bytes and send %d bytes\n", (rlen ? *rlen : 0), (wlen ? *wlen : 0));
     return ret;
 }
 
