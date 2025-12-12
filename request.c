@@ -48,6 +48,8 @@ extern int FAKE_ALLOW204;
 extern int CHILD_HALT;
 
 #define FORBITTEN_STR "ICAP/1.0 403 Forbidden\r\n\r\n"
+#define X_EMPTY_TRAILER "X-Empty-Trailer: 0\r\n\r\n"
+#define X_EMPTY_TRAILER_SIZE (sizeof(X_EMPTY_TRAILER) - 1)
 
 #define ci_method_supported(METHOD, METHOD_DEF) (METHOD & METHOD_DEF)
 
@@ -540,6 +542,9 @@ static int parse_header(ci_request_t * req)
                 req->allow204 = 1;
             if (strstr(h->headers[i]+6, "206"))
                 req->allow206 = 1;
+            if (strcasestr(h->headers[i]+6, "trailers")) {
+                req->allow_trailers = 1;
+            }
         }
     }
 
@@ -700,6 +705,16 @@ static int ec_responce(ci_request_t * req, int ec)
     return len;
 }
 
+static int resp_check_body(ci_request_t * req)
+{
+    int i;
+    ci_encaps_entity_t **e = req->entities;
+    for (i = 0; e[i] != NULL; i++)
+        if (e[i]->type == ICAP_NULL_BODY)
+            return 0;
+    return 1;
+}
+
 extern char MY_HOSTNAME[];
 static int mk_responce_header(ci_request_t * req)
 {
@@ -733,6 +748,13 @@ static int mk_responce_header(ci_request_t * req)
             e_list[0] = e_list[1];
             e_list[1] = e_list[2];
             e_list[2] = NULL;
+        }
+    }
+    req->responce_hasbody = resp_check_body(req);
+    if (req->trailer_names && req->responce_hasbody) {
+        if (req->return_code == EC_200 || req->return_code == EC_206) {
+            ci_headers_add(head, "Allow: trailers");
+            ci_headers_add(head, req->trailer_names);
         }
     }
 
@@ -834,18 +856,6 @@ static int format_body_chunk(ci_request_t * req)
     return CI_OK;
 }
 
-
-
-static int resp_check_body(ci_request_t * req)
-{
-    int i;
-    ci_encaps_entity_t **e = req->entities;
-    for (i = 0; e[i] != NULL; i++)
-        if (e[i]->type == ICAP_NULL_BODY)
-            return 0;
-    return 1;
-}
-
 /*
 The
 if((ret=send_current_block_data(req))!=0)
@@ -864,7 +874,6 @@ static int update_send_status(ci_request_t * req)
             ci_debug_printf(1, "Error constructing the responce headers!\n");
             return CI_ERROR;
         }
-        req->responce_hasbody = resp_check_body(req);
 
         req->pstrblock_responce = req->response_header->buf;
         req->remain_send_block_bytes = req->response_header->bufused;
@@ -874,14 +883,36 @@ static int update_send_status(ci_request_t * req)
         return CI_OK;
     }
 
-    if (req->status == SEND_EOF) {
-        ci_debug_printf(9, "The req->status is EOF (remain to send bytes:%d)\n",
+    if (req->status == SEND_TRAILERS) {
+        ci_debug_printf(9, "The req->status is TRAILERS (remain to send bytes:%d)\n",
                         req->remain_send_block_bytes);
         if (req->remain_send_block_bytes == 0)
             return CI_EOF;
         else
             return CI_OK;
     }
+
+    if (req->status == SEND_EOF) {
+        ci_debug_printf(9, "The req->status is EOF (remain to send bytes:%d)\n",
+                        req->remain_send_block_bytes);
+        if (req->remain_send_block_bytes == 0) {
+            const int haveTrailers = req->allow_trailers && req->trailer_names;
+            if (!haveTrailers)
+                return CI_EOF; // finish here
+            if (req->xtrailers) {
+                ci_headers_pack(req->xtrailers);
+                req->pstrblock_responce = req->xtrailers->buf;
+                req->remain_send_block_bytes = req->xtrailers->bufused;
+            } else {
+                // We promise to send trailers, send a fake one
+                req->pstrblock_responce = X_EMPTY_TRAILER;
+                req->remain_send_block_bytes = X_EMPTY_TRAILER_SIZE;
+            }
+            req->status = SEND_TRAILERS;
+        }
+        return CI_OK;
+    }
+
     if (req->status == SEND_BODY) {
         ci_debug_printf(9, "Send status is SEND_BODY return\n");
         return CI_OK;

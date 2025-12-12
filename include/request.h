@@ -54,7 +54,7 @@ extern "C"
 //enum REQUEST_STATUS { WAIT,SERVED };
 
 enum GETDATA_STATUS {GET_NOTHING = 0,GET_HEADERS,GET_PREVIEW,GET_BODY,GET_EOF};
-enum SENDDATA_STATUS {SEND_NOTHING = 0, SEND_RESPHEAD, SEND_HEAD1, SEND_HEAD2, SEND_HEAD3, SEND_BODY, SEND_EOF };
+enum SENDDATA_STATUS {SEND_NOTHING = 0, SEND_RESPHEAD, SEND_HEAD1, SEND_HEAD2, SEND_HEAD3, SEND_BODY, SEND_EOF, SEND_TRAILERS };
 
 /*enum BODY_RESPONCE_STATUS{ CHUNK_DEF = 1,CHUNK_BODY,CHUNK_END};*/
 
@@ -113,6 +113,8 @@ typedef struct ci_request {
     ci_encaps_entity_t *entities[5];//At most 3 and 1 for termination.....
     ci_encaps_entity_t *trash_entities[7];
     ci_headers_list_t *xheaders;
+    ci_headers_list_t *xtrailers;
+    char *trailer_names;
 
     void *service_data;
 
@@ -165,6 +167,7 @@ typedef struct ci_request {
     /* added flags/variables*/
     int allow206;
     int64_t i206_use_original_body;
+    int allow_trailers;
     ci_ip_t xclient_ip;
     enum CI_PROTO protocol;
     struct {

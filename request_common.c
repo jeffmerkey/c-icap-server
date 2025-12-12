@@ -252,6 +252,7 @@ ci_request_t *ci_request_alloc(ci_connection_t * connection)
     req->keepalive = 1;        /*Keep alive connection is the default behaviour for icap protocol. */
     req->allow204 = 0;
     req->allow206 = 0;
+    req->allow_trailers = 0;
     req->hasbody = 0;
     req->responce_hasbody = 0;
     req->eof_received = 0;
@@ -260,6 +261,8 @@ ci_request_t *ci_request_alloc(ci_connection_t * connection)
     req->request_header = ci_headers_create();
     req->response_header = ci_headers_create();
     req->xheaders = ci_headers_create();
+    req->xtrailers = NULL;
+    req->trailer_names = NULL;
     req->status = SEND_NOTHING;
     req->return_code = -1;
 
@@ -330,11 +333,18 @@ void ci_request_reset(ci_request_t * req)
     req->keepalive = 1;        /*Keep alive connection is the default behaviour for icap protocol. */
     req->allow204 = 0;
     req->allow206 = 0;
+    req->allow_trailers = 0;
     req->hasbody = 0;
     req->responce_hasbody = 0;
     ci_headers_reset(req->request_header);
     ci_headers_reset(req->response_header);
     ci_headers_reset(req->xheaders);
+    if (req->xtrailers)
+        ci_headers_reset(req->xtrailers);
+    if (req->trailer_names) {
+        ci_buffer_free(req->trailer_names);
+        req->trailer_names = NULL;
+    }
     req->eof_received = 0;
     req->eof_sent = 0;
 
@@ -409,6 +419,10 @@ void ci_request_destroy(ci_request_t * req)
     ci_headers_destroy(req->request_header);
     ci_headers_destroy(req->response_header);
     ci_headers_destroy(req->xheaders);
+    if (req->xtrailers)
+        ci_headers_destroy(req->xtrailers);
+    if (req->trailer_names)
+        ci_buffer_free(req->trailer_names);
     for (i = 0; req->entities[i] != NULL; i++)
         destroy_encaps_entity(req->entities[i]);
 

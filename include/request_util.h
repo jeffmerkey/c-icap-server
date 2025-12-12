@@ -342,6 +342,24 @@ CI_DECLARE_FUNC(const char *) ci_icap_request_get_header(ci_request_t *req, cons
 */
 CI_DECLARE_FUNC(const char *) ci_icap_response_get_header(ci_request_t *req, const char *header);
 
+/**
+ \ingroup REQUEST
+ \brief Promise to send the given trailer headers after the response body data sent
+ \param req is a pointer to the current ICAP request object.
+ \param trailer_names a list of coma separated trailer header names
+ \return pointer to the current trailer names string on success or NULL on failure
+*/
+CI_DECLARE_FUNC(const char *) ci_icap_response_promise_trailers(ci_request_t *req, const char *trailer_names);
+
+/**
+ \ingroup REQUEST
+ \brief Add the given trailer header to the ICAP response
+ \param req is a pointer to the current ICAP request object.
+ \param trailer a header to add to the trailers in the "Header: Value" form
+ \return pointer to the header in success or NULL otherwise
+*/
+CI_DECLARE_FUNC(const char *) ci_icap_response_add_trailer(ci_request_t *req, const char *trailer);
+
 /*Inlined functions*/
 static inline void ci_req_lock_data_inline(ci_request_t *req) {
     _CI_ASSERT(req);
@@ -383,6 +401,11 @@ static inline int ci_req_allow206_outside_preview_inline(const ci_request_t *req
     return (req->allow206 && req->allow204);
 }
 
+static inline int ci_req_allow_trailers_inline(const ci_request_t *req) {
+    _CI_ASSERT(req);
+    return req->allow_trailers;
+}
+
 static inline int ci_req_sent_data_inline(const ci_request_t *req) {
     _CI_ASSERT(req);
     return req->status;
@@ -402,6 +425,7 @@ CI_DECLARE_FUNC(int) ci_req_preview_size_non_inline(const ci_request_t *req);
 CI_DECLARE_FUNC(int) ci_req_allow204_non_inline(const ci_request_t *req);
 CI_DECLARE_FUNC(int) ci_req_allow206_non_inline(const ci_request_t *req);
 CI_DECLARE_FUNC(int) ci_req_allow206_outside_preview_non_inline(const ci_request_t *req);
+CI_DECLARE_FUNC(int) ci_req_allow_trailers_non_inline(const ci_request_t *req);
 CI_DECLARE_FUNC(int) ci_req_sent_data_non_inline(const ci_request_t *req);
 CI_DECLARE_FUNC(int) ci_req_hasalldata_non_inline(const ci_request_t *req);
 
@@ -506,6 +530,18 @@ static inline int ci_req_allow206_outside_preview(const ci_request_t *req) {
     return ci_req_allow206_outside_preview_inline(req);
 #else
     return ci_req_allow206_outside_preview_non_inline(req);
+#endif
+}
+
+/**
+ \ingroup REQUEST
+ \return True (non zero int) if the ICAP request supports trailers
+ */
+static inline int ci_req_allow_trailers(const ci_request_t *req) {
+#if defined CI_USE_INLINE_OBJECT_METHODS
+    return ci_req_allow_trailers_inline(req);
+#else
+    return ci_req_allow_trailers_non_inline(req);
 #endif
 }
 

@@ -43,6 +43,8 @@ CI_DECLARE_FUNC(int)          ci_client_icapfilter(ci_request_t *req,
         void *data_dest,
         int (*dest_write) (void *,char *,int));
 
+CI_DECLARE_FUNC(int) ci_client_request_allow_trailers(ci_request_t *req, int yesno);
+
 /**
  \ingroup ICAPCLIENT
  * Function to send HTTP objects to an ICAP server for processing. It sends

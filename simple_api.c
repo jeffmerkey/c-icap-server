@@ -294,6 +294,40 @@ ci_headers_list_t *ci_icap_response_headers(ci_request_t *req)
     return req ? req->response_header : NULL;
 }
 
+const char *ci_icap_response_promise_trailers(ci_request_t *req, const char *trailer_names)
+{
+    if (req->packed)  /*Not in edit mode*/
+        return NULL;
+
+    if (!req->allow_trailers)
+        return NULL;
+
+    if (req->trailer_names) {
+        const size_t old_size = strlen(req->trailer_names);
+        const size_t add_size = strlen(trailer_names) + 2/*", "*/ + 1/*eos*/;
+        const size_t new_size = old_size + add_size;
+        char *nbuf = ci_buffer_realloc(req->trailer_names, new_size);
+        if (!nbuf)
+            return NULL;
+        snprintf(req->trailer_names + old_size, new_size, ", %s", trailer_names);
+    } else {
+        const size_t sz = strlen(trailer_names) + 9 /*"Trailer: "*/ + 1 /*'\0'*/;
+        req->trailer_names = ci_buffer_alloc(sz);
+        if (req->trailer_names)
+            snprintf(req->trailer_names, sz, "Trailer: %s", trailer_names);
+    }
+    return req->trailer_names;
+}
+
+const char * ci_icap_response_add_trailer(ci_request_t *req, const char *trailer)
+{
+    if (!req->xtrailers)
+        req->xtrailers = ci_headers_create();
+    if (req->xtrailers)
+        return ci_headers_add(req->xtrailers, trailer);
+    return NULL;
+}
+
 void ci_req_lock_data_non_inline(ci_request_t *req) {
     return ci_req_lock_data_inline(req);
 }
@@ -331,6 +365,10 @@ int ci_req_allow206_non_inline(const ci_request_t *req)
 int ci_req_allow206_outside_preview_non_inline(const ci_request_t *req)
 {
     return ci_req_allow206_outside_preview_inline(req);
+}
+
+int ci_req_allow_trailers_non_inline(const ci_request_t *req) {
+    return ci_req_allow_trailers_inline(req);
 }
 
 int ci_req_sent_data_non_inline(const ci_request_t *req)

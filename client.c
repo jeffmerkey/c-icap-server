@@ -50,8 +50,14 @@ enum CLIENT_STATUS {
     CLIENT_PROCESS_DATA_GET_HEADERS,
     CLIENT_PROCESS_DATA_HEADERS_FINISHED,
     CLIENT_PROCESS_DATA_GET_BODY,
-    CLIENT_PROCESS_DATA_GET_EOF
+    CLIENT_PROCESS_DATA_GET_TRAILERS,
+    CLIENT_PROCESS_END_OF_RESPONSE
 };
+
+int ci_client_request_allow_trailers(ci_request_t *req, int yesno)
+{
+    return (req->allow_trailers = yesno ? 1 : 0);
+}
 
 ci_request_t *ci_client_request(ci_connection_t * conn, const char *server,
                                 const char *service)
@@ -66,6 +72,7 @@ ci_request_t *ci_client_request(ci_connection_t * conn, const char *server,
     req->req_server[CI_MAXHOSTNAMELEN] = '\0';
     strncpy(req->service, service, MAX_SERVICE_NAME);
     req->service[MAX_SERVICE_NAME] = '\0';
+    req->allow_trailers = 1;
     return req;
 }
 
@@ -101,6 +108,7 @@ void ci_client_request_reuse(ci_request_t * req)
     req->allow204 = 0;
     req->allow206 = 0;
     req->i206_use_original_body = -1;
+    req->allow_trailers = 1;
 
     req->bytes_in = 0;
     req->bytes_out = 0;
@@ -144,12 +152,17 @@ static int client_create_request(ci_request_t * req, char *servername, char *ser
         ci_headers_add(req->request_header, buf);
     }
 
-    if (ci_req_allow204(req) && ci_req_allow206(req))
-        ci_headers_add(req->request_header, "Allow: 204, 206");
-    else if (ci_req_allow204(req))
-        ci_headers_add(req->request_header, "Allow: 204");
-    if (ci_req_allow206(req))
-        ci_headers_add(req->request_header, "Allow: 206");
+    if (ci_req_allow204(req) || ci_req_allow206(req) ||ci_req_allow_trailers(req)) {
+        snprintf(buf, sizeof(buf),
+                 "Allow: %s%s%s%s%s",
+                 (ci_req_allow204(req) ? "204" : ""),
+                 (ci_req_allow206(req) && ci_req_allow204(req) ? ", " : ""),
+                 (ci_req_allow206(req) ? "206" : ""),
+                 (ci_req_allow_trailers(req) && (ci_req_allow206(req) || ci_req_allow204(req)) ? ", " : ""),
+                 (ci_req_allow_trailers(req) ? "trailers" : "")
+            );
+        ci_headers_add(req->request_header, buf);
+    }
 
     if (!ci_headers_is_empty(req->xheaders)) {
         ci_headers_addheaders(req->request_header, req->xheaders);
@@ -545,7 +558,7 @@ static int client_parse_incoming_data(ci_request_t * req, void *data_dest,
         ci_headers_unpack(req->response_header);
 
         if (ci_req_allow204(req) && status == 204) {
-            req->status = CLIENT_PROCESS_DATA_GET_EOF;
+            req->status = CLIENT_PROCESS_END_OF_RESPONSE;
             return 204;
         }
 
@@ -597,7 +610,7 @@ static int client_parse_incoming_data(ci_request_t * req, void *data_dest,
         req->write_to_module_pending = 0;
 
         if (req->entities[1]->type == ICAP_NULL_BODY) {
-            req->status = CLIENT_PROCESS_DATA_GET_EOF;
+            req->status = CLIENT_PROCESS_END_OF_RESPONSE;
             return CI_OK;
         } else {
             req->status = CLIENT_PROCESS_DATA_GET_BODY;
@@ -606,37 +619,54 @@ static int client_parse_incoming_data(ci_request_t * req, void *data_dest,
         }
     }
 
-    if (req->status == CLIENT_PROCESS_DATA_GET_BODY) {
-        do {
-            if ((ret = parse_chunk_data(req, &buf)) == CI_ERROR) {
-                ci_debug_printf(1,
-                                "Error parsing chunks, current chunk len: %d, read: %d, readlen: %d, str: %.*s\n",
-                                req->current_chunk_len,
-                                req->chunk_bytes_read,
-                                req->pstrblock_read_len,
-                                (req->pstrblock_read_len < 64 ? req->pstrblock_read_len : 64),
-                                req->pstrblock_read);
+    ret = CI_OK;
+    while (req->status == CLIENT_PROCESS_DATA_GET_BODY) {
+        if ((ret = parse_chunk_data(req, &buf)) == CI_ERROR) {
+            ci_debug_printf(1,
+                            "Error parsing chunks, current chunk len: %d, read: %d, readlen: %d, str: %.*s\n",
+                            req->current_chunk_len,
+                            req->chunk_bytes_read,
+                            req->pstrblock_read_len,
+                            (req->pstrblock_read_len < 64 ? req->pstrblock_read_len : 64),
+                            req->pstrblock_read);
+            return CI_ERROR;
+        }
+
+        while (req->write_to_module_pending > 0) {
+            bytes =
+                (*dest_write) (data_dest, buf,
+                               req->write_to_module_pending);
+            if (bytes < 0) {
+                ci_debug_printf(1, "Error writing to output file!\n");
                 return CI_ERROR;
             }
+            req->write_to_module_pending -= bytes;
+        }
 
-            while (req->write_to_module_pending > 0) {
-                bytes =
-                    (*dest_write) (data_dest, buf,
-                                   req->write_to_module_pending);
-                if (bytes < 0) {
-                    ci_debug_printf(1, "Error writing to output file!\n");
-                    return CI_ERROR;
-                }
-                req->write_to_module_pending -= bytes;
-            }
-
-            if (ret == CI_EOF) {
-                req->status = CLIENT_PROCESS_DATA_GET_EOF;
+        if (ret == CI_EOF) {
+            if (req->allow_trailers && ci_headers_search(req->response_header, "Trailer")) {
+                req->status = CLIENT_PROCESS_DATA_GET_TRAILERS;
+                if (req->pstrblock_read_len == 0)
+                    return CI_NEEDS_MORE;
+            } else {
+                req->status = CLIENT_PROCESS_END_OF_RESPONSE;
                 return CI_OK;
             }
-        } while (ret != CI_NEEDS_MORE);
+        }
+        if (ret == CI_NEEDS_MORE)
+            return CI_NEEDS_MORE;
+    }
 
-        return CI_NEEDS_MORE;
+
+    if (req->status == CLIENT_PROCESS_DATA_GET_TRAILERS) {
+        if (!req->xtrailers)
+            req->xtrailers = ci_headers_create();
+        ret = client_parse_icap_header(req, req->xtrailers);
+        if (ret == CI_OK) {
+            ci_headers_unpack(req->xtrailers);
+            req->status = CLIENT_PROCESS_END_OF_RESPONSE;
+        }
+        return ret;
     }
 
     return CI_OK;
@@ -711,7 +741,7 @@ static int ci_client_send_and_get_data(ci_request_t * req,
     if (!req->eof_sent || req->remain_send_block_bytes)
         client_action |= NEEDS_TO_WRITE_TO_ICAP;
 
-    if (req->status != CLIENT_PROCESS_DATA_GET_EOF)
+    if (req->status != CLIENT_PROCESS_END_OF_RESPONSE)
         client_action |= NEEDS_TO_READ_FROM_ICAP;
 
     return client_action;

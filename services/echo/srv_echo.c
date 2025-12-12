@@ -27,9 +27,11 @@
 
 enum srv_echo_mode {mode_echo, mode_allow204, mode_mix};
 static int MODE = mode_echo;
+static int USE_TRAILERS = 0;
 static int srv_echo_cfg_mode(const char *directive, const char **argv, void *setdata);
 static struct ci_conf_entry conf_variables[] = {
-    {"Mode", NULL, srv_echo_cfg_mode, NULL}
+    {"Mode", NULL, srv_echo_cfg_mode, NULL},
+    {"UseTrailers", &USE_TRAILERS, ci_cfg_onoff, NULL}
 };
 
 int echo_init_service(ci_service_xdata_t * srv_xdata,
@@ -197,6 +199,8 @@ int echo_check_preview_handler(char *preview_data, int preview_data_len,
             echo_data->eof = ci_req_hasalldata(req);
         }
         ci_icap_add_xheader(req, "X-Echo-Action: continue");
+        if (USE_TRAILERS && ci_req_allow_trailers(req))
+            ci_icap_response_promise_trailers(req, "X-Echo-Trailer");
         return CI_MOD_CONTINUE;
     } else { /*if (useMode == mode_allow204)*/
         /*Nothing to do just return an allow204 (No modification) to terminate here
@@ -214,6 +218,8 @@ int echo_end_of_data_handler(ci_request_t * req)
     struct echo_req_data *echo_data = ci_service_data(req);
     /*mark the eof*/
     echo_data->eof = 1;
+    if (USE_TRAILERS)
+        ci_icap_response_add_trailer(req, "X-Echo-Trailer: echo");
     /*and return CI_MOD_DONE */
     return CI_MOD_DONE;
 }

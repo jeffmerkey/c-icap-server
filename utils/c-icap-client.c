@@ -70,6 +70,12 @@ void print_headers(ci_request_t * req)
         ci_headers_iterate(headers, NULL, printhead);
         ci_debug_printf(1, "\n");
     }
+
+    if (req->xtrailers) {
+        ci_debug_printf(1, "ICAP TRAILERS:\n");
+        ci_headers_iterate(req->xtrailers, NULL, printhead);
+        ci_debug_printf(1, "\n");
+    }
 }
 
 void build_respmod_headers(int fd, char *filename, ci_headers_list_t *headers)
@@ -237,6 +243,7 @@ int send_headers = 1;
 int send_preview = 1;
 int allow204 = 1;
 int allow206 = 0;
+int use_trailers = 1;
 int verbose = 0;
 ci_headers_list_t *xheaders = NULL;
 ci_headers_list_t *http_xheaders = NULL;
@@ -288,6 +295,7 @@ static struct ci_options_entry options[] = {
     {"-rhx", "xheader", &http_resp_xheaders, add_xheader, "Include the 'xheader' in http response headers"},
     {"-no-rh", "header-name", &http_no_resp_headers, add_header_name, "Do not include the header 'header-name' in http response headers"},
     {"-w", "preview", &preview_size, ci_cfg_set_int, "Sets the maximum preview data size"},
+    {"-no-trailers", NULL, &use_trailers, ci_cfg_disable, "Do not allow trailers"},
     {"-v", NULL, &verbose, ci_cfg_enable, "Print response headers"},
     {NULL, NULL, NULL, NULL}
 };
@@ -434,6 +442,8 @@ int main(int argc, char **argv)
             req->allow204 = 1;
         if (allow206)
             req->allow206 = 1;
+        if (!use_trailers)
+            ci_client_request_allow_trailers(req, 0);
 
         if (xheaders)
             ci_icap_append_xheaders(req, xheaders);
